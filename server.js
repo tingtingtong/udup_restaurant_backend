@@ -3,12 +3,13 @@ const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const cors = require('cors'); // Import CORS
+const cors = require('cors');
 
 const app = express();
 app.use(bodyParser.json());
-app.use(cors()); // Enable CORS
+app.use(cors());
 
+// Connect to MongoDB
 mongoose.connect('mongodb://localhost:27017/udupi-restaurant', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -18,7 +19,7 @@ mongoose.connect('mongodb://localhost:27017/udupi-restaurant', {
   console.error('Failed to connect to MongoDB', err);
 });
 
-// Models
+// Schemas
 const UserSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -28,30 +29,25 @@ const User = mongoose.model('User', UserSchema);
 
 const InventorySchema = new mongoose.Schema({
   itemName: { type: String, required: true },
-  quantity: { type: Number, required: true },
-  unit: { type: String, required: true },
+  key: { type: Number, required: true, unique: true },
+  stockTaken: { type: Number, required: true },
+  stockRemaining: { type: Number, required: true },
+  totalStock: { type: Number, required: true },
+  dateTime: { type: Date, default: Date.now, required: true },
 });
 const Inventory = mongoose.model('Inventory', InventorySchema);
 
-const OrderSchema = new mongoose.Schema({
-  items: [
-    {
-      itemName: String,
-      quantity: Number,
-      price: Number,
-    },
-  ],
-  totalAmount: Number,
-  date: { type: Date, default: Date.now },
+const ItemSchema = new mongoose.Schema({
+  name: { type: String, required: true, unique: true },
 });
-const Order = mongoose.model('Order', OrderSchema);
+const Item = mongoose.model('Item', ItemSchema);
 
 // Middleware for authentication
 const authenticate = (req, res, next) => {
   const token = req.header('Authorization');
   if (!token) return res.status(401).send('Access Denied');
   try {
-    const verified = jwt.verify(token, 'secret');
+    const verified = jwt.verify(token.split(' ')[1], 'secret');
     req.user = verified;
     next();
   } catch (err) {
@@ -86,8 +82,10 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.post('/api/inventory/add', authenticate, async (req, res) => {
-  const { itemName, quantity, unit } = req.body;
-  const inventory = new Inventory({ itemName, quantity, unit });
+  const { itemName, stockTaken, totalStock } = req.body;
+  const stockRemaining = totalStock - stockTaken;
+  const key = await Inventory.countDocuments() + 1;
+  const inventory = new Inventory({ itemName, key, stockTaken, stockRemaining, totalStock });
   await inventory.save();
   res.send('Item added to inventory');
   console.log('Item added:', inventory);
@@ -101,10 +99,11 @@ app.get('/api/inventory/list', authenticate, async (req, res) => {
 
 app.put('/api/inventory/update/:id', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { quantity } = req.body;
-  await Inventory.findByIdAndUpdate(id, { quantity });
+  const { stockTaken, totalStock } = req.body;
+  const stockRemaining = totalStock - stockTaken;
+  await Inventory.findByIdAndUpdate(id, { stockTaken, stockRemaining, totalStock });
   res.send('Inventory updated');
-  console.log('Inventory updated:', id, quantity);
+  console.log('Inventory updated:', id, stockTaken, stockRemaining, totalStock);
 });
 
 app.delete('/api/inventory/delete/:id', authenticate, async (req, res) => {
@@ -133,6 +132,21 @@ app.get('/api/dashboard/stats', authenticate, async (req, res) => {
   const orderCount = await Order.countDocuments();
   res.json({ inventoryCount, orderCount });
   console.log('Dashboard stats:', { inventoryCount, orderCount });
+});
+
+// Routes for managing item names
+app.post('/api/items/add', authenticate, async (req, res) => {
+  const { name } = req.body;
+  const item = new Item({ name });
+  await item.save();
+  res.send('Item name added');
+  console.log('Item name added:', item);
+});
+
+app.get('/api/items/list', authenticate, async (req, res) => {
+  const items = await Item.find();
+  res.json(items);
+  console.log('Item names list:', items);
 });
 
 const port = process.env.PORT || 5000;
