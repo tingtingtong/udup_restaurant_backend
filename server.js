@@ -91,10 +91,44 @@ app.post('/api/inventory/add', authenticate, async (req, res) => {
   console.log('Item added:', inventory);
 });
 
-app.get('/api/inventory/list', authenticate, async (req, res) => {
-  const inventory = await Inventory.find();
+app.get('/api/inventory/list/:timeFrame', authenticate, async (req, res) => {
+  const { timeFrame } = req.params;
+  const now = new Date();
+  let startDate;
+
+  switch (timeFrame) {
+    case 'today':
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      break;
+    case 'twoDays':
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2);
+      break;
+    case 'week':
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+      break;
+    case 'month':
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+      break;
+    default:
+      startDate = new Date(0); // Return all records if no valid time frame is provided
+      break;
+  }
+
+  const inventory = await Inventory.find({ dateTime: { $gte: startDate, $lt: now } });
   res.json(inventory);
-  console.log('Inventory list:', inventory);
+  console.log(`Inventory list for ${timeFrame}:`, inventory);
+});
+
+app.get('/api/inventory/list', authenticate, async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const inventory = await Inventory.find({
+    dateTime: {
+      $gte: new Date(startDate),
+      $lt: new Date(new Date(endDate).setDate(new Date(endDate).getDate() + 1))
+    }
+  });
+  res.json(inventory);
+  console.log(`Inventory list from ${startDate} to ${endDate}:`, inventory);
 });
 
 app.put('/api/inventory/update/:id', authenticate, async (req, res) => {
@@ -137,6 +171,10 @@ app.get('/api/dashboard/stats', authenticate, async (req, res) => {
 // Routes for managing item names
 app.post('/api/items/add', authenticate, async (req, res) => {
   const { name } = req.body;
+  const existingItem = await Item.findOne({ name });
+  if (existingItem) {
+    return res.status(400).send('Item already exists');
+  }
   const item = new Item({ name });
   await item.save();
   res.send('Item name added');
